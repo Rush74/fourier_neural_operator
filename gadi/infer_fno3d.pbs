@@ -1,0 +1,27 @@
+#!/bin/bash
+# Run a trained model on new data (milliseconds per sample).
+# Submit from the repository root: qsub gadi/infer_fno3d.pbs
+#PBS -P ab12
+#PBS -q dgxa100
+#PBS -l ngpus=1
+#PBS -l ncpus=16
+#PBS -l mem=200GB
+#PBS -l jobfs=50GB
+#PBS -l walltime=00:30:00
+#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l wd
+#PBS -N fno3d_infer
+#PBS -j oe
+
+module load python3/3.11.7
+source /g/data/ab12/$USER/envs/fno/bin/activate
+export OMP_NUM_THREADS=$PBS_NCPUS
+
+DATA=NavierStokes_V1e-3_N5000_T50.mat
+RUN=v1e-3_m8_w20
+cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/
+
+python infer_fno3d.py \
+  --ckpt /scratch/ab12/$USER/fno/runs/$RUN/checkpoint.pt \
+  --data $PBS_JOBFS/$DATA --first 4800 --n 200 \
+  --out  /scratch/ab12/$USER/fno/pred/$RUN.mat

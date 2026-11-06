@@ -1,0 +1,29 @@
+#!/bin/bash
+# Train one FNO-3D configuration on one A100.
+# Submit from the repository root: qsub gadi/train_fno3d.pbs
+# Longer than 48 h? Chain jobs: qsub -W depend=afterany:<jobid> gadi/train_fno3d.pbs
+# Each job resumes from $OUT/checkpoint.pt.
+#PBS -P ab12
+#PBS -q dgxa100
+#PBS -l ngpus=1
+#PBS -l ncpus=16
+#PBS -l mem=200GB
+#PBS -l jobfs=50GB
+#PBS -l walltime=12:00:00
+#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l wd
+#PBS -N fno3d_v1e-3
+#PBS -j oe
+
+module load python3/3.11.7
+source /g/data/ab12/$USER/envs/fno/bin/activate
+export OMP_NUM_THREADS=$PBS_NCPUS
+
+DATA=NavierStokes_V1e-3_N5000_T50.mat
+RUN=v1e-3_m8_w20                                  # fixed name, so resubmits resume
+OUT=/scratch/ab12/$USER/fno/runs/$RUN
+mkdir -p $OUT
+cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/  # node-local NVMe
+
+python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT \
+       --modes 8 --width 20 --epochs 500 >> $OUT/train.log 2>&1

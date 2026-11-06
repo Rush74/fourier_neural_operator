@@ -1,0 +1,37 @@
+#!/bin/bash
+# Eight independent runs on one DGX A100 node, one per GPU (Gadi has no PBS job arrays).
+# Submit from the repository root: qsub gadi/sweep_fno3d.pbs
+#PBS -P ab12
+#PBS -q dgxa100
+#PBS -l ngpus=8
+#PBS -l ncpus=128
+#PBS -l mem=1000GB
+#PBS -l jobfs=200GB
+#PBS -l walltime=24:00:00
+#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l wd
+#PBS -N fno3d_sweep
+#PBS -j oe
+
+module load python3/3.11.7
+source /g/data/ab12/$USER/envs/fno/bin/activate
+export OMP_NUM_THREADS=16
+
+DATA=NavierStokes_V1e-3_N5000_T50.mat
+cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/
+
+CONFIGS=( "--modes 8 --width 20" "--modes 8 --width 32" "--modes 12 --width 20" "--modes 12 --width 32"
+          "--modes 8 --width 20 --seed 1" "--modes 8 --width 20 --seed 2"
+          "--modes 16 --width 20" "--modes 12 --width 32 --ntrain 2000" )
+
+# Bind each run to the CPU socket nearest its GPU when numactl is available.
+# Assumes GPUs 0-3 on socket 0 and 4-7 on socket 1; check with: nvidia-smi topo -m
+BIND=""
+for i in "${!CONFIGS[@]}"; do
+  OUT=/scratch/ab12/$USER/fno/runs/sweep_$i
+  mkdir -p $OUT
+  if command -v numactl >/dev/null; then BIND="numactl --cpunodebind=$(( i / 4 ))"; fi
+  CUDA_VISIBLE_DEVICES=$i $BIND \
+    python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} >> $OUT/train.log 2>&1 &
+done
+wait

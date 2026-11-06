@@ -1,0 +1,30 @@
+#!/bin/bash
+# Data-parallel training on all 8 A100s of one node, for the large datasets
+# (e.g. nu = 1e-4 with N = 10000). Submit from the repository root: qsub gadi/train_ddp.pbs
+#PBS -P ab12
+#PBS -q dgxa100
+#PBS -l ngpus=8
+#PBS -l ncpus=128
+#PBS -l mem=1000GB
+#PBS -l jobfs=200GB
+#PBS -l walltime=48:00:00
+#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l wd
+#PBS -N fno3d_ddp
+#PBS -j oe
+
+module load python3/3.11.7
+source /g/data/ab12/$USER/envs/fno/bin/activate
+export OMP_NUM_THREADS=16
+export NCCL_DEBUG=WARN
+
+DATA=NavierStokes_V1e-4_N10000_T30.mat           # set to the file name you downloaded
+OUT=/scratch/ab12/$USER/fno/runs/v1e-4_ddp
+mkdir -p $OUT
+cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/
+
+# T = 30 in this dataset, so use 10 input and 20 output steps.
+# --batch is per GPU (global batch = 80); the learning rate is scaled up to match.
+torchrun --standalone --nproc_per_node=$PBS_NGPUS fourier_3d_gadi.py \
+    --data $PBS_JOBFS/$DATA --out $OUT --ntrain 9800 --ntest 200 \
+    --t-in 10 --t 20 --modes 8 --width 20 --batch 10 --lr 4e-3 >> $OUT/train.log 2>&1
