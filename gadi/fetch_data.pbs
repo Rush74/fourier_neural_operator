@@ -1,19 +1,22 @@
 #!/bin/bash
 # Download the published PDE datasets. Runs on copyq: dgxa100 nodes have no internet access.
 # Submit from the repository root: qsub gadi/fetch_data.pbs
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q copyq
 #PBS -l ncpus=1
 #PBS -l mem=8GB
 #PBS -l walltime=02:00:00
-#PBS -l storage=gdata/ab12
+#PBS -l storage=gdata/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N fno_fetch
 #PBS -j oe
+#PBS -o /home/548/pag548/code/fourier_neural_operator/gadi/fetch.out
+#PBS -e /home/548/pag548/code/fourier_neural_operator/gadi/fetch.err
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
-cd /g/data/ab12/$USER/fno/data
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
+source /g/data/dv70/pag548/envs/gdown/bin/activate
+cd /g/data/dv70/pag548/fno/data
 # Google Drive folder from README.md. If it is rate-limited, copy the file from
-# your workstation instead: rsync <file> <user>@gadi-dm.nci.org.au:/g/data/ab12/<user>/fno/data/
-gdown --folder https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-
+# your workstation instead: rsync <file> pag548@gadi-dm.nci.org.au:/g/data/dv70/pag548/fno/data/PDE_datasets/
+python -m gdown --folder https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-

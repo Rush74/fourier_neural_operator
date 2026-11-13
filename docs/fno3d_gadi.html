@@ -535,31 +535,28 @@ u(x)=Q\big(v_4(x)\big)
       </div>
 
       <h3>1 · One-off setup on a login node</h3>
-      <div class="prose"><p>Compute nodes have no internet access, so install everything from a login node. Keep the environment on <code>/g/data</code>, because <code>/home</code> is small and <code>/scratch</code> is purged. Replace <code>ab12</code> with your project code.</p></div>
-      <div class="code"><div class="fname"><span>login node · bash</span><button class="copy" type="button">Copy</button></div><pre><span class="c"># pick a current Python: `module avail python3`</span>
-module load python3/3.11.7
-python3 -m venv /g/data/ab12/$USER/envs/fno
-source /g/data/ab12/$USER/envs/fno/bin/activate
-pip install --upgrade pip
-<span class="c"># CUDA wheel bundles its own runtime; the A100 driver on the node is enough</span>
-pip install torch --index-url https://download.pytorch.org/whl/cu121
-pip install numpy scipy h5py matplotlib gdown
+      <div class="prose"><p>Every job uses NCI's <code>pet</code> environment from project <code>dk92</code>, which already provides PyTorch with CUDA, NumPy, SciPy, h5py and Matplotlib. Jobs must list <code>gdata/dk92</code> in <code>#PBS -l storage=</code> to see it. The only extra package is <code>gdown</code> for step 2. Compute nodes have no internet access, so install it from a login node, in a small venv on <code>/g/data</code> layered on <code>pet</code>'s Python.</p></div>
+      <div class="code"><div class="fname"><span>login node · bash (gadi/setup_env.sh)</span><button class="copy" type="button">Copy</button></div><pre>module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
+python3 -m venv --system-site-packages /g/data/dv70/pag548/envs/gdown
+/g/data/dv70/pag548/envs/gdown/bin/python -m pip install gdown
 
-mkdir -p /g/data/ab12/$USER/fno/{data,runs}
-cd /g/data/ab12/$USER/fno &amp;&amp; git clone -b gadi_test &lt;your-fork-url&gt; code</pre></div>
+mkdir -p /g/data/dv70/pag548/fno/{data,runs}
+cd /g/data/dv70/pag548/fno &amp;&amp; git clone -b gadi_test &lt;your-fork-url&gt; code</pre></div>
 
       <h3>2 · Fetch the dataset (copyq has internet)</h3>
       <div class="code"><div class="fname"><span>fetch_data.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q copyq
 #PBS -l ncpus=1,mem=8GB,walltime=02:00:00
-#PBS -l storage=gdata/ab12
+#PBS -l storage=gdata/dv70+gdata/dk92
 #PBS -l wd
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
-cd /g/data/ab12/$USER/fno/data
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
+source /g/data/dv70/pag548/envs/gdown/bin/activate
+cd /g/data/dv70/pag548/fno/data
 <span class="c"># Google Drive folder from README.md; download only the NS files you need</span>
-gdown --folder https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-</pre></div>
+python -m gdown --folder https://drive.google.com/drive/folders/1UnbQh2WWc6knEHbLn-ZaXrKUZhp7pjt-</pre></div>
       <p class="caption">This is the only batch step not on <code>dgxa100</code>: GPU nodes cannot reach the internet, and <code>copyq</code> is NCI's queue for external transfers. If Google Drive rate-limits the download, fetch the file on your workstation and <code>rsync</code> it to <code>gadi-dm.nci.org.au</code>. Alternatively, generate the data on <code>dgxa100</code> with <code>ns_2d.py</code> (step 6).</p>
 
       <h3>3 · Make the script cluster-ready</h3>
@@ -610,72 +607,72 @@ ckpt, start = os.path.join(args.out, <span class="k">'checkpoint.pt'</span>), 0
 
       <h3>3a · Interactive smoke test on dgxa100</h3>
       <div class="prose"><p>Before a long batch run, open a 30-minute interactive session on one A100. Use it to check the environment, the GPU and the time per epoch.</p></div>
-      <div class="code"><div class="fname"><span>login node · bash</span><button class="copy" type="button">Copy</button></div><pre>qsub -I -P ab12 -q dgxa100 \
+      <div class="code"><div class="fname"><span>login node · bash</span><button class="copy" type="button">Copy</button></div><pre>qsub -I -P dv70 -q dgxa100 \
      -l ngpus=1,ncpus=16,mem=200GB,jobfs=50GB,walltime=00:30:00 \
-     -l storage=gdata/ab12+scratch/ab12 -l wd
+     -l storage=gdata/dv70+scratch/dv70+gdata/dk92 -l wd
 
 <span class="c"># once the prompt appears on the DGX node:</span>
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 nvidia-smi                                     <span class="c"># expect one A100-SXM4-80GB</span>
 python -c "import torch; print(torch.cuda.get_device_name(0), torch.backends.cuda.matmul.allow_tf32)"
-cd /g/data/ab12/$USER/fno/code
-python fourier_3d_gadi.py --data /g/data/ab12/$USER/fno/data/NavierStokes_V1e-3_N5000_T50.mat \
-       --out /scratch/ab12/$USER/fno/runs/smoke --epochs 5</pre></div>
+cd /g/data/dv70/pag548/fno/code
+python fourier_3d_gadi.py --data /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5000_T50.mat \
+       --out /scratch/dv70/pag548/fno/runs/smoke --epochs 5</pre></div>
       <p class="caption">Multiply the printed seconds per epoch by 500, then add about 20% margin, to set <code>walltime</code> in step 4.</p>
 
       <h3>4 · Train on one A100</h3>
       <div class="code"><div class="fname"><span>train_fno3d.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=1
 #PBS -l ncpus=16
 #PBS -l mem=200GB
 #PBS -l jobfs=50GB
 #PBS -l walltime=12:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N fno3d_v1e-3
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=$PBS_NCPUS
 
 DATA=NavierStokes_V1e-3_N5000_T50.mat
-cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/      <span class="c"># node-local NVMe</span>
-OUT=/scratch/ab12/$USER/fno/runs/v1e-3_m8_w20          <span class="c"># fixed name =&gt; resubmits resume</span>
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/      <span class="c"># node-local NVMe</span>
+OUT=/scratch/dv70/pag548/fno/runs/v1e-3_m8_w20          <span class="c"># fixed name =&gt; resubmits resume</span>
 
-cd /g/data/ab12/$USER/fno/code
+cd /g/data/dv70/pag548/fno/code
 python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT \
        --modes 8 --width 20 --epochs 500 &gt; $OUT.log 2&gt;&amp;1</pre></div>
       <p class="caption">Submit with <code>qsub train_fno3d.pbs</code> and watch with <code>qstat -swx</code> and <code>nqstat_anu</code>. For runs longer than 48 h, chain resubmissions: <code>qsub -W depend=afterany:&lt;jobid&gt; train_fno3d.pbs</code>. Each one resumes from <code>checkpoint.pt</code>.</p>
 
       <h3>5 · Sweep: 8 runs on one node</h3>
       <div class="code"><div class="fname"><span>sweep_fno3d.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=8
 #PBS -l ncpus=128
 #PBS -l mem=1000GB
 #PBS -l jobfs=200GB
 #PBS -l walltime=24:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=16
 DATA=NavierStokes_V1e-3_N5000_T50.mat
-cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/
-cd /g/data/ab12/$USER/fno/code
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/
+cd /g/data/dv70/pag548/fno/code
 
 CONFIGS=( "--modes 8 --width 20" "--modes 8 --width 32" "--modes 12 --width 20" "--modes 12 --width 32"
           "--modes 8 --width 20 --seed 1" "--modes 8 --width 20 --seed 2"
           "--modes 16 --width 20" "--modes 12 --width 32 --ntrain 2000" )
 for i in "${!CONFIGS[@]}"; do
-  OUT=/scratch/ab12/$USER/fno/runs/sweep_$i
+  OUT=/scratch/dv70/pag548/fno/runs/sweep_$i
   CUDA_VISIBLE_DEVICES=$i numactl --cpunodebind=$(( i / 4 )) \
     python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} &gt; $OUT.log 2&gt;&amp;1 &amp;
 done
@@ -684,86 +681,86 @@ wait</pre></div>
 
       <h3>6 · Generate new data in parallel</h3>
       <div class="code"><div class="fname"><span>gen_ns.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=8
 #PBS -l ncpus=128
 #PBS -l mem=1000GB
 #PBS -l walltime=24:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N ns_gen
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=16
-cd /g/data/ab12/$USER/fno/code
-mkdir -p /scratch/ab12/$USER/fno/gen
+cd /g/data/dv70/pag548/fno/code
+mkdir -p /scratch/dv70/pag548/fno/gen
 
 <span class="c"># ns_2d_gadi.py: seeded copy of ns_2d.py, one snapshot per unit time, saved on 64²</span>
 for i in $(seq 0 7); do
   CUDA_VISIBLE_DEVICES=$i python data_generation/navier_stokes/ns_2d_gadi.py \
     --seed $i --n 640 --batch 64 --visc 1e-3 --T 50 \
-    --out /scratch/ab12/$USER/fno/gen/ns_$i.mat &amp;
+    --out /scratch/dv70/pag548/fno/gen/ns_$i.mat &amp;
 done
 wait
 <span class="c"># join the 8 shards (5120 samples) into one HDF5 file that MatReader reads</span>
-python gadi/merge_shards.py --out /g/data/ab12/$USER/fno/data/NavierStokes_V1e-3_N5120_T50.mat \
-    /scratch/ab12/$USER/fno/gen/ns_?.mat</pre></div>
+python gadi/merge_shards.py --out /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5120_T50.mat \
+    /scratch/dv70/pag548/fno/gen/ns_?.mat</pre></div>
 
       <h3>7 · Multi-GPU training for the large datasets</h3>
       <div class="prose"><p>For ν = 1e-4 with N = 10000, use multi-GPU training. <code>fourier_3d_gadi.py</code> switches to it automatically when launched with <code>torchrun</code>: it wraps the model in <code>DistributedDataParallel</code>, splits batches with a <code>DistributedSampler</code>, and has rank 0 evaluate and save checkpoints. That dataset has T = 30, so use 10 input and 20 output steps:</p></div>
       <div class="code"><div class="fname"><span>train_ddp.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=8
 #PBS -l ncpus=128
 #PBS -l mem=1000GB
 #PBS -l jobfs=200GB
 #PBS -l walltime=48:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N fno3d_ddp
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=16
 export NCCL_DEBUG=WARN
-cp /g/data/ab12/$USER/fno/data/NavierStokes_V1e-4_N10000_T30.mat $PBS_JOBFS/
-cd /g/data/ab12/$USER/fno/code
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-4_N10000_T30.mat $PBS_JOBFS/
+cd /g/data/dv70/pag548/fno/code
 
 torchrun --standalone --nproc_per_node=$PBS_NGPUS \
   fourier_3d_gadi.py --data $PBS_JOBFS/NavierStokes_V1e-4_N10000_T30.mat \
-  --out /scratch/ab12/$USER/fno/runs/v1e-4_ddp --ntrain 9800 --ntest 200 \
+  --out /scratch/dv70/pag548/fno/runs/v1e-4_ddp --ntrain 9800 --ntest 200 \
   --t-in 10 --t 20 --batch 10 --lr 4e-3   <span class="c"># per-GPU batch; global = 80</span></pre></div>
       <p class="caption">With 8× the global batch, scale the learning rate (start near 4e-3 to 8e-3 with a short warm-up) or keep a global batch of 10 and accept less speed-up. Two-node jobs (256 cores) are limited to 5 h, so use them only if one node is too slow.</p>
 
       <h3>8 · Inference job on dgxa100</h3>
       <div class="code"><div class="fname"><span>infer_fno3d.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=1
 #PBS -l ncpus=16
 #PBS -l mem=200GB
 #PBS -l jobfs=50GB
 #PBS -l walltime=00:30:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N fno3d_infer
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=$PBS_NCPUS
-cp /g/data/ab12/$USER/fno/data/NavierStokes_V1e-3_N5000_T50.mat $PBS_JOBFS/
-cd /g/data/ab12/$USER/fno/code
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5000_T50.mat $PBS_JOBFS/
+cd /g/data/dv70/pag548/fno/code
 
 python infer_fno3d.py \
-  --ckpt /scratch/ab12/$USER/fno/runs/v1e-3_m8_w20/checkpoint.pt \
+  --ckpt /scratch/dv70/pag548/fno/runs/v1e-3_m8_w20/checkpoint.pt \
   --data $PBS_JOBFS/NavierStokes_V1e-3_N5000_T50.mat \
-  --out  /scratch/ab12/$USER/fno/pred/v1e-3_m8_w20.mat</pre></div>
+  --out  /scratch/dv70/pag548/fno/pred/v1e-3_m8_w20.mat</pre></div>
       <div class="code"><div class="fname"><span>infer_fno3d.py</span><button class="copy" type="button">Copy</button></div><pre>s = torch.load(ckpt, map_location=<span class="k">'cuda'</span>); a = s[<span class="k">'args'</span>]
 model = FNO3d(a[<span class="k">'modes'</span>], a[<span class="k">'modes'</span>], a[<span class="k">'modes'</span>], a[<span class="k">'width'</span>]).cuda()
 model.load_state_dict(s[<span class="k">'model'</span>]); model.eval()
@@ -778,7 +775,7 @@ scipy.io.savemat(out_path, {<span class="k">'pred'</span>: pred.cpu().numpy()})<
 
       <div class="note info">
         <span class="eyebrow">Storage checklist</span>
-        <p>Every filesystem a job touches must be listed in <code>#PBS -l storage=</code>, or the job cannot see it. Keep code and the venv on <code>/g/data</code>, put run outputs on <code>/scratch</code> (purged after a period of no access), and stage input <code>.mat</code> files to <code>$PBS_JOBFS</code> at job start.</p>
+        <p>Every filesystem a job touches must be listed in <code>#PBS -l storage=</code>, or the job cannot see it. For these jobs that is <code>gdata/dv70+scratch/dv70+gdata/dk92</code>: <code>dk92</code> holds the <code>pet</code> environment. Keep code and the gdown venv on <code>/g/data</code>, put run outputs on <code>/scratch</code> (purged after a period of no access), and stage input <code>.mat</code> files to <code>$PBS_JOBFS</code> at job start.</p>
       </div>
     </section>
 
@@ -796,7 +793,7 @@ scipy.io.savemat(out_path, {<span class="k">'pred'</span>: pred.cpu().numpy()})<
         <li>NCI Gadi User Guide: <a href="https://opus.nci.org.au/display/Help/Queue+Limits">Queue Limits</a>, <a href="https://opus.nci.org.au/display/Help/Queue+Structure">Queue Structure</a>, <a href="https://opus.nci.org.au/display/Help/PBS+Directives+Explained">PBS Directives Explained</a>.</li>
         <li>PyTorch documentation: <a href="https://pytorch.org/docs/stable/fft.html">torch.fft</a>, <a href="https://pytorch.org/docs/stable/notes/ddp.html">Distributed Data Parallel</a>, <a href="https://pytorch.org/docs/stable/elastic/run.html">torchrun</a>.</li>
       </ol>
-      <footer>Written from the code on branch <code>gadi_test</code> at commit 892e187. Gadi queue figures come from NCI's documentation as of November 2026. <code>ab12</code> stands for your NCI project code, and the module versions are examples to confirm with <code>module avail</code>.</footer>
+      <footer>Written from the code on branch <code>gadi_test</code> at commit 892e187. Gadi queue figures come from NCI's documentation as of November 2026. The scripts use NCI project <code>dv70</code> and user <code>pag548</code>; the module versions are examples to confirm with <code>module avail</code>.</footer>
     </section>
   </main>
 </div>

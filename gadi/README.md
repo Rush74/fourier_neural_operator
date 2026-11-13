@@ -2,10 +2,6 @@
 
 Full write-up, with the mathematics and the reasoning behind each job: `docs/fno3d_gadi.html`.
 
-Before you start, replace the placeholder project code `ab12` with yours:
-
-    sed -i 's/ab12/<your-project>/g' gadi/*.pbs gadi/setup_env.sh
-
 Submit every job from the repository root (the scripts use `#PBS -l wd`).
 
 | Step | File | Queue | Resources |
@@ -24,11 +20,11 @@ dgxa100 rules: ncpus = 16 x ngpus, 4.5 SU per core-hour (72 SU per GPU-hour),
 
 Interactive smoke test (5 epochs, to time an epoch before a long run):
 
-    qsub -I -P ab12 -q dgxa100 -l ngpus=1,ncpus=16,mem=200GB,jobfs=50GB,walltime=00:30:00 \
-         -l storage=gdata/ab12+scratch/ab12 -l wd
-    module load python3/3.11.7 && source /g/data/ab12/$USER/envs/fno/bin/activate
-    python fourier_3d_gadi.py --data /g/data/ab12/$USER/fno/data/NavierStokes_V1e-3_N5000_T50.mat \
-           --out /scratch/ab12/$USER/fno/runs/smoke --epochs 5
+    qsub -I -P dv70 -q dgxa100 -l ngpus=1,ncpus=16,mem=200GB,jobfs=50GB,walltime=00:30:00 \
+         -l storage=gdata/dv70+scratch/dv70+gdata/dk92 -l wd
+    module use /g/data/dk92/apps/Modules/modulefiles && module load pet/2025.08
+    python fourier_3d_gadi.py --data /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5000_T50.mat \
+           --out /scratch/dv70/pag548/fno/runs/smoke --epochs 5
 
 Python files used by these jobs:
 

@@ -1,24 +1,24 @@
 #!/bin/bash
 # Generate Navier-Stokes training data: 8 seeded solver runs, one per GPU.
 # Submit from the repository root: qsub gadi/gen_ns.pbs
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=8
 #PBS -l ncpus=128
 #PBS -l mem=1000GB
 #PBS -l walltime=24:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N ns_gen
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=16
 
 VISC=1e-3
 T=50
-GEN=/scratch/ab12/$USER/fno/gen/V${VISC}_T${T}
+GEN=/scratch/dv70/pag548/fno/gen/V${VISC}_T${T}
 mkdir -p $GEN
 
 for i in $(seq 0 7); do
@@ -28,4 +28,4 @@ done
 wait
 
 # 8 x 640 = 5120 samples in one file that MatReader can read
-python gadi/merge_shards.py --out /g/data/ab12/$USER/fno/data/NavierStokes_V${VISC}_N5120_T${T}.mat $GEN/ns_?.mat
+python gadi/merge_shards.py --out /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V${VISC}_N5120_T${T}.mat $GEN/ns_?.mat

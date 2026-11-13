@@ -1,27 +1,27 @@
 #!/bin/bash
 # Data-parallel training on all 8 A100s of one node, for the large datasets
 # (e.g. nu = 1e-4 with N = 10000). Submit from the repository root: qsub gadi/train_ddp.pbs
-#PBS -P ab12
+#PBS -P dv70
 #PBS -q dgxa100
 #PBS -l ngpus=8
 #PBS -l ncpus=128
 #PBS -l mem=1000GB
 #PBS -l jobfs=200GB
 #PBS -l walltime=48:00:00
-#PBS -l storage=gdata/ab12+scratch/ab12
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
 #PBS -l wd
 #PBS -N fno3d_ddp
 #PBS -j oe
 
-module load python3/3.11.7
-source /g/data/ab12/$USER/envs/fno/bin/activate
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
 export OMP_NUM_THREADS=16
 export NCCL_DEBUG=WARN
 
 DATA=NavierStokes_V1e-4_N10000_T30.mat           # set to the file name you downloaded
-OUT=/scratch/ab12/$USER/fno/runs/v1e-4_ddp
+OUT=/scratch/dv70/pag548/fno/runs/v1e-4_ddp
 mkdir -p $OUT
-cp /g/data/ab12/$USER/fno/data/$DATA $PBS_JOBFS/
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/
 
 # T = 30 in this dataset, so use 10 input and 20 output steps.
 # --batch is per GPU (global batch = 80); the learning rate is scaled up to match.
