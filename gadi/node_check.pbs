@@ -1,0 +1,21 @@
+#!/bin/bash
+# Print the CPU/NUMA layout and GPU topology of a dgxa100 node, to check the
+# numactl binding in sweep_fno3d.pbs. Output lands in node_check.o<jobid>.
+# Submit from the repository root: qsub gadi/node_check.pbs
+#PBS -P dv70
+#PBS -q dgxa100
+#PBS -l ngpus=2
+#PBS -l ncpus=32
+#PBS -l mem=32GB
+#PBS -l walltime=00:05:00
+#PBS -l wd
+#PBS -N node_check
+#PBS -j oe
+
+echo "Node: $(hostname)"
+echo
+echo "=== lscpu | grep NUMA ==="
+lscpu | grep NUMA
+echo
+echo "=== nvidia-smi topo -m ==="
+nvidia-smi topo -m
