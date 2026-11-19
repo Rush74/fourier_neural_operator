@@ -542,7 +542,9 @@ python3 -m venv --system-site-packages /g/data/dv70/pag548/envs/gdown
 /g/data/dv70/pag548/envs/gdown/bin/python -m pip install gdown
 
 mkdir -p /g/data/dv70/pag548/fno/{data,runs}
-cd /g/data/dv70/pag548/fno &amp;&amp; git clone -b gadi_test &lt;your-fork-url&gt; code</pre></div>
+mkdir -p ~/code &amp;&amp; cd ~/code
+git clone -b gadi_test git@github.com:Rush74/fourier_neural_operator.git
+<span class="c"># submit every job from ~/code/fourier_neural_operator: the scripts use -l wd</span></pre></div>
 
       <h3>2 · Fetch the dataset (copyq has internet)</h3>
       <div class="code"><div class="fname"><span>fetch_data.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
@@ -616,7 +618,6 @@ module use /g/data/dk92/apps/Modules/modulefiles
 module load pet/2025.08
 nvidia-smi                                     <span class="c"># expect one A100-SXM4-80GB</span>
 python -c "import torch; print(torch.cuda.get_device_name(0), torch.backends.cuda.matmul.allow_tf32)"
-cd /g/data/dv70/pag548/fno/code
 python fourier_3d_gadi.py --data /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5000_T50.mat \
        --out /scratch/dv70/pag548/fno/runs/smoke --epochs 5</pre></div>
       <p class="caption">Multiply the printed seconds per epoch by 500, then add about 20% margin, to set <code>walltime</code> in step 4.</p>
@@ -643,10 +644,9 @@ DATA=NavierStokes_V1e-3_N5000_T50.mat
 cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/      <span class="c"># node-local NVMe</span>
 OUT=/scratch/dv70/pag548/fno/runs/v1e-3_m8_w20          <span class="c"># fixed name =&gt; resubmits resume</span>
 
-cd /g/data/dv70/pag548/fno/code
 python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT \
        --modes 8 --width 20 --epochs 500 &gt; $OUT.log 2&gt;&amp;1</pre></div>
-      <p class="caption">Submit with <code>qsub train_fno3d.pbs</code> and watch with <code>qstat -swx</code> and <code>nqstat_anu</code>. For runs longer than 48 h, chain resubmissions: <code>qsub -W depend=afterany:&lt;jobid&gt; train_fno3d.pbs</code>. Each one resumes from <code>checkpoint.pt</code>.</p>
+      <p class="caption">Submit from the repository root with <code>qsub gadi/train_fno3d.pbs</code> and watch with <code>qstat -swx</code> and <code>nqstat_anu</code>. For runs longer than 48 h, chain resubmissions: <code>qsub -W depend=afterany:&lt;jobid&gt; gadi/train_fno3d.pbs</code>. Each one resumes from <code>checkpoint.pt</code>.</p>
 
       <h3>5 · Sweep: 8 runs on one node</h3>
       <div class="code"><div class="fname"><span>sweep_fno3d.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
@@ -666,18 +666,29 @@ module load pet/2025.08
 export OMP_NUM_THREADS=16
 DATA=NavierStokes_V1e-3_N5000_T50.mat
 cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/
-cd /g/data/dv70/pag548/fno/code
 
 CONFIGS=( "--modes 8 --width 20" "--modes 8 --width 32" "--modes 12 --width 20" "--modes 12 --width 32"
           "--modes 8 --width 20 --seed 1" "--modes 8 --width 20 --seed 2"
           "--modes 16 --width 20" "--modes 12 --width 32 --ntrain 2000" )
+
+export CUDA_DEVICE_ORDER=PCI_BUS_ID              <span class="c"># CUDA index $i = nvidia-smi index $i</span>
 for i in "${!CONFIGS[@]}"; do
   OUT=/scratch/dv70/pag548/fno/runs/sweep_$i
-  CUDA_VISIBLE_DEVICES=$i numactl --cpunodebind=$(( i / 4 )) \
-    python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} &gt; $OUT.log 2&gt;&amp;1 &amp;
+  mkdir -p $OUT
+  BIND=""
+  if command -v numactl &gt;/dev/null; then
+    BUS=$(nvidia-smi -i $i --query-gpu=pci.bus_id --format=csv,noheader | tr A-F a-f)
+    NODE=$(cat /sys/bus/pci/devices/${BUS: -12}/numa_node 2&gt;/dev/null || echo -1)
+    <span class="k">if</span> [ "$NODE" -ge 0 ]; <span class="k">then</span>                <span class="c"># GPU's NUMA node + GPU-free neighbour</span>
+      BIND="numactl --cpunodebind=$NODE,$(( NODE ^ 1 )) --preferred=$NODE"
+    <span class="k">fi</span>
+  fi
+  echo "run $i: GPU $i, ${BIND:-no binding}"
+  CUDA_VISIBLE_DEVICES=$i $BIND \
+    python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} &gt;&gt; $OUT/train.log 2&gt;&amp;1 &amp;
 done
 wait</pre></div>
-      <p class="caption">The <code>numactl</code> binding assumes GPUs 0–3 sit on the first socket and 4–7 on the second. Check with <code>nvidia-smi topo -m</code> and drop it if <code>numactl</code> is unavailable. Cost: 576 SU per hour of wall time.</p>
+      <p class="caption"><code>gadi/node_check.pbs</code> measured the dgxa100 layout: 8 NUMA nodes of 16 cores (node <i>k</i> = cores 16<i>k</i>–16<i>k</i>+15), with GPUs in pairs on NUMA 1, 3, 5 and 7 and no GPU on the even nodes. Each run is bound to its own GPU's NUMA node, looked up from <code>/sys</code>, plus the GPU-free neighbour on the same socket (<code>NODE ^ 1</code>). The two runs of a GPU pair therefore share 32 nearby cores, 16 threads each, and memory is preferred on the GPU's node. A fixed mapping such as <code>--cpunodebind=$(( i / 4 ))</code> would pack four runs onto one 16-core node away from their GPUs. If <code>numactl</code> is missing or the lookup fails, a run starts unbound; the job output lists each run's binding. Cost: 576 SU per hour of wall time.</p>
 
       <h3>6 · Generate new data in parallel</h3>
       <div class="code"><div class="fname"><span>gen_ns.pbs</span><button class="copy" type="button">Copy</button></div><pre>#!/bin/bash
@@ -695,7 +706,6 @@ wait</pre></div>
 module use /g/data/dk92/apps/Modules/modulefiles
 module load pet/2025.08
 export OMP_NUM_THREADS=16
-cd /g/data/dv70/pag548/fno/code
 mkdir -p /scratch/dv70/pag548/fno/gen
 
 <span class="c"># ns_2d_gadi.py: seeded copy of ns_2d.py, one snapshot per unit time, saved on 64²</span>
@@ -729,7 +739,6 @@ module load pet/2025.08
 export OMP_NUM_THREADS=16
 export NCCL_DEBUG=WARN
 cp /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-4_N10000_T30.mat $PBS_JOBFS/
-cd /g/data/dv70/pag548/fno/code
 
 torchrun --standalone --nproc_per_node=$PBS_NGPUS \
   fourier_3d_gadi.py --data $PBS_JOBFS/NavierStokes_V1e-4_N10000_T30.mat \
@@ -755,7 +764,6 @@ module use /g/data/dk92/apps/Modules/modulefiles
 module load pet/2025.08
 export OMP_NUM_THREADS=$PBS_NCPUS
 cp /g/data/dv70/pag548/fno/data/PDE_datasets/NavierStokes_V1e-3_N5000_T50.mat $PBS_JOBFS/
-cd /g/data/dv70/pag548/fno/code
 
 python infer_fno3d.py \
   --ckpt /scratch/dv70/pag548/fno/runs/v1e-3_m8_w20/checkpoint.pt \

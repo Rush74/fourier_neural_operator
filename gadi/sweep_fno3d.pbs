@@ -24,13 +24,24 @@ CONFIGS=( "--modes 8 --width 20" "--modes 8 --width 32" "--modes 12 --width 20" 
           "--modes 8 --width 20 --seed 1" "--modes 8 --width 20 --seed 2"
           "--modes 16 --width 20" "--modes 12 --width 32 --ntrain 2000" )
 
-# Bind each run to the CPU socket nearest its GPU when numactl is available.
-# Assumes GPUs 0-3 on socket 0 and 4-7 on socket 1; check with: nvidia-smi topo -m
-BIND=""
+# Bind each run to the CPUs nearest its GPU when numactl is available.
+# dgxa100 nodes (gadi/node_check.pbs): 8 NUMA nodes of 16 cores; GPUs sit in pairs on
+# NUMA 1, 3, 5, 7 and the even nodes have no GPU. Each run gets its GPU's NUMA node plus
+# the GPU-free neighbour on the same socket (32 cores per GPU pair), with memory preferred
+# on the GPU's node. Order CUDA devices like nvidia-smi, so $i names the same GPU in both.
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 for i in "${!CONFIGS[@]}"; do
   OUT=/scratch/dv70/pag548/fno/runs/sweep_$i
   mkdir -p $OUT
-  if command -v numactl >/dev/null; then BIND="numactl --cpunodebind=$(( i / 4 ))"; fi
+  BIND=""
+  if command -v numactl >/dev/null; then
+    BUS=$(nvidia-smi -i $i --query-gpu=pci.bus_id --format=csv,noheader | tr A-F a-f)
+    NODE=$(cat /sys/bus/pci/devices/${BUS: -12}/numa_node 2>/dev/null || echo -1)
+    if [ "$NODE" -ge 0 ]; then
+      BIND="numactl --cpunodebind=$NODE,$(( NODE ^ 1 )) --preferred=$NODE"
+    fi
+  fi
+  echo "run $i: GPU $i, ${BIND:-no binding}"
   CUDA_VISIBLE_DEVICES=$i $BIND \
     python fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} >> $OUT/train.log 2>&1 &
 done
