@@ -1,6 +1,6 @@
 #!/bin/bash
-# Print the CPU/NUMA layout and GPU topology of a dgxa100 node, to check the
-# numactl binding in sweep_fno3d.pbs. Output lands in node_check.o<jobid>.
+# Print the CPU/NUMA layout and GPU topology of a dgxa100 node, and check that the
+# per-GPU numactl binding used in sweep_fno3d.pbs works. Output lands in node_check.o<jobid>.
 # Submit from the repository root: qsub gadi/node_check.pbs
 #PBS -P dv70
 #PBS -q dgxa100
@@ -19,3 +19,34 @@ lscpu | grep NUMA
 echo
 echo "=== nvidia-smi topo -m ==="
 nvidia-smi topo -m
+echo
+echo "=== CPUs this job may use ==="
+grep Cpus_allowed_list /proc/self/status
+
+echo
+echo "=== numactl ==="
+if ! command -v numactl >/dev/null; then
+  echo "numactl not found: sweep_fno3d.pbs will run every job unbound"
+  exit 0
+fi
+command -v numactl
+echo
+echo "--- numactl --hardware ---"
+numactl --hardware
+echo
+echo "--- numactl --show ---"
+numactl --show
+
+echo
+echo "=== Sweep binding, tried for each GPU in this job ==="
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+for i in $(seq 0 $(( $(nvidia-smi -L | wc -l) - 1 ))); do
+  BUS=$(nvidia-smi -i $i --query-gpu=pci.bus_id --format=csv,noheader | tr A-F a-f)
+  NODE=$(cat /sys/bus/pci/devices/${BUS: -12}/numa_node 2>/dev/null || echo -1)
+  echo "GPU $i: bus ${BUS: -12}, NUMA node $NODE"
+  if [ "$NODE" -ge 0 ]; then
+    BIND="numactl --cpunodebind=$NODE,$(( NODE ^ 1 )) --preferred=$NODE"
+    echo "  $BIND"
+    $BIND grep Cpus_allowed_list /proc/self/status || echo "  binding FAILED (exit $?)"
+  fi
+done
