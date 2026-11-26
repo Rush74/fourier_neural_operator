@@ -1,0 +1,54 @@
+#!/bin/bash
+# Four independent runs on one gpuvolta node (4x V100 32GB), one per GPU. The 8-run sweep is
+# split over two jobs, selected with HALF (0 = configs 0-3, 1 = configs 4-7); use
+# gadi/submit_sweep_gpuvolta.sh to submit both. Output dirs are sweep_<config index>, so they
+# match the old DGX sweep. Rerunning a half resumes from each run's checkpoint.pt.
+# Submit from the repository root: qsub -v HALF=0 gadi/sweep_fno3d_gpuvolta.pbs
+#PBS -P dv70
+#PBS -q gpuvolta
+#PBS -l ngpus=4
+#PBS -l ncpus=48
+#PBS -l mem=380GB
+#PBS -l jobfs=200GB
+#PBS -l walltime=48:00:00
+#PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
+#PBS -l wd
+#PBS -N fno3d_sweep
+#PBS -j oe
+
+HALF=${HALF:?submit with qsub -v HALF=0 or HALF=1}
+
+module use /g/data/dk92/apps/Modules/modulefiles
+module load pet/2025.08
+export OMP_NUM_THREADS=12
+export PYTHONPATH=$PWD   # utilities3.py and Adam.py live in the repository root (-l wd = submit dir)
+
+DATA=NavierStokes_V1e-3_N5000_T50.mat
+cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/
+
+CONFIGS=( "--modes 8 --width 20" "--modes 8 --width 32" "--modes 12 --width 20" "--modes 12 --width 32"
+          "--modes 8 --width 20 --seed 1" "--modes 8 --width 20 --seed 2"
+          "--modes 16 --width 20" "--modes 12 --width 32 --ntrain 2000" )
+
+# gpuvolta nodes (gadi/node_check.pbs): 4 NUMA nodes in two sockets (0-1, 2-3), 2 V100s per
+# socket. Bind each run to its GPU's NUMA node plus the neighbour on the same socket, with
+# memory preferred on the GPU's node. This needs the whole node (ncpus=48) so that every
+# NUMA node's cores are in the job's cpuset. Order CUDA devices like nvidia-smi.
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+for g in 0 1 2 3; do
+  i=$(( HALF * 4 + g ))
+  OUT=/scratch/dv70/pag548/fno/runs/sweep_$i
+  mkdir -p $OUT
+  BIND=""
+  if command -v numactl >/dev/null; then
+    BUS=$(nvidia-smi -i $g --query-gpu=pci.bus_id --format=csv,noheader | tr A-F a-f)
+    NODE=$(cat /sys/bus/pci/devices/${BUS: -12}/numa_node 2>/dev/null || echo -1)
+    if [ "$NODE" -ge 0 ]; then
+      BIND="numactl --cpunodebind=$NODE,$(( NODE ^ 1 )) --preferred=$NODE"
+    fi
+  fi
+  echo "run $i: GPU $g, ${BIND:-no binding}"
+  CUDA_VISIBLE_DEVICES=$g $BIND \
+    python gadi/fourier_3d_gadi.py --data $PBS_JOBFS/$DATA --out $OUT ${CONFIGS[$i]} >> $OUT/train.log 2>&1 &
+done
+wait
