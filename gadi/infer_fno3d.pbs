@@ -2,10 +2,10 @@
 # Run a trained model on new data (milliseconds per sample).
 # Submit from the repository root: qsub gadi/infer_fno3d.pbs
 #PBS -P dv70
-#PBS -q dgxa100
+#PBS -q gpuvolta
 #PBS -l ngpus=1
-#PBS -l ncpus=16
-#PBS -l mem=200GB
+#PBS -l ncpus=12
+#PBS -l mem=90GB
 #PBS -l jobfs=50GB
 #PBS -l walltime=00:30:00
 #PBS -l storage=gdata/dv70+scratch/dv70+gdata/dk92
@@ -16,9 +16,10 @@
 module use /g/data/dk92/apps/Modules/modulefiles
 module load pet/2025.08
 export OMP_NUM_THREADS=$PBS_NCPUS
+export PYTHONPATH=$PWD/gadi:$PWD   # fourier_3d_gadi.py is in gadi/, utilities3.py in the root
 
 DATA=NavierStokes_V1e-3_N5000_T50.mat
-RUN=v1e-3_m8_w20
+RUN=sweep_7
 cp /g/data/dv70/pag548/fno/data/PDE_datasets/$DATA $PBS_JOBFS/
 
 python infer_fno3d.py \
